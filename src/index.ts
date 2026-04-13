@@ -41,41 +41,56 @@ async function apiPost<T>(
 
 interface TrackEvent {
   time_iso: string;
-  time_utc: string;
-  time_raw: string;
+  time_raw: string | null;
+  time_utc: string | null;
   description: string;
-  location: string;
-  stage: string;
-  sub_status: string;
+  location: string | null;
+  stage: string | null;
+  sub_status: string | null;
 }
 
-interface LatestStatus {
-  status: string;
-  substatus: string;
-  time_iso: string;
-  time_utc: string;
-  time_raw: string;
-  location: string;
-  description: string;
+interface Provider {
+  provider: { key: number; name: string; alias: string };
+  latest_sync_status: string;
+  latest_sync_time: string;
+  events: TrackEvent[];
 }
 
 interface TrackInfo {
+  latest_status: {
+    status: string;
+    sub_status: string;
+    sub_status_descr: string | null;
+  };
+  latest_event: TrackEvent | null;
+  shipping_info: {
+    shipper_address: { country: string | null };
+    recipient_address: { country: string | null };
+  };
+  time_metrics: {
+    days_after_order: number;
+    days_of_transit: number;
+    estimated_delivery_date: {
+      source: string | null;
+      from: string | null;
+      to: string | null;
+    };
+  };
+  tracking: {
+    providers: Provider[];
+  };
+}
+
+interface TrackAccepted {
   number: string;
   carrier: number;
-  carrier_name?: string;
-  status: string;
-  substatus: string;
-  latest_status: LatestStatus;
-  events: TrackEvent[];
-  original_country?: string;
-  destination_country?: string;
-  estimated_delivery_time?: string;
+  track_info: TrackInfo;
 }
 
 interface ApiTrackInfoResponse {
   code: number;
   data: {
-    accepted: Array<{ number: string; "track_info": TrackInfo }>;
+    accepted: TrackAccepted[];
     rejected: Array<{ number: string; error: { code: number; message: string } }>;
   };
 }
@@ -91,9 +106,10 @@ interface ApiRegisterResponse {
 interface ApiQuotaResponse {
   code: number;
   data: {
-    quota: number;
-    used: number;
-    remaining: number;
+    quota_total: number;
+    quota_used: number;
+    quota_remain: number;
+    today_used: number;
   };
 }
 
@@ -111,39 +127,52 @@ const STATUS_LABELS: Record<string, string> = {
   Exception: "Exception",
 };
 
-function formatTrackInfo(info: TrackInfo): string {
+function formatTrackInfo(item: TrackAccepted): string {
   const lines: string[] = [];
-  const statusLabel = STATUS_LABELS[info.status] ?? info.status;
+  const info = item.track_info;
+  const status = info.latest_status.status;
+  const statusLabel = STATUS_LABELS[status] ?? status;
+  const subStatus = info.latest_status.sub_status;
 
-  lines.push(`Tracking Number : ${info.number}`);
-  lines.push(`Status          : ${statusLabel}${info.substatus ? ` (${info.substatus})` : ""}`);
+  lines.push(`Tracking Number : ${item.number}`);
+  lines.push(`Carrier Code    : ${item.carrier}`);
+  lines.push(`Status          : ${statusLabel}${subStatus ? ` (${subStatus})` : ""}`);
 
-  if (info.latest_status) {
-    lines.push(`Latest Update   : ${info.latest_status.description}`);
-    if (info.latest_status.location) {
-      lines.push(`Location        : ${info.latest_status.location}`);
-    }
-    lines.push(`Time (UTC)      : ${info.latest_status.time_utc}`);
+  if (info.latest_event) {
+    const ev = info.latest_event;
+    if (ev.description) lines.push(`Latest Update   : ${ev.description}`);
+    if (ev.location)    lines.push(`Location        : ${ev.location}`);
+    if (ev.time_utc)    lines.push(`Time (UTC)      : ${ev.time_utc}`);
   }
 
-  if (info.estimated_delivery_time) {
-    lines.push(`Est. Delivery   : ${info.estimated_delivery_time}`);
+  const edd = info.time_metrics.estimated_delivery_date;
+  if (edd.from || edd.to) {
+    const range = edd.from && edd.to ? `${edd.from} – ${edd.to}` : (edd.from ?? edd.to);
+    lines.push(`Est. Delivery   : ${range}`);
   }
 
-  if (info.original_country) {
-    lines.push(`Origin          : ${info.original_country}`);
+  const origin = info.shipping_info.shipper_address.country;
+  const dest   = info.shipping_info.recipient_address.country;
+  if (origin) lines.push(`Origin          : ${origin}`);
+  if (dest)   lines.push(`Destination     : ${dest}`);
+
+  if (info.time_metrics.days_of_transit > 0) {
+    lines.push(`Days in Transit : ${info.time_metrics.days_of_transit}`);
   }
 
-  if (info.destination_country) {
-    lines.push(`Destination     : ${info.destination_country}`);
+  // Collect all events from all providers
+  const allEvents: TrackEvent[] = [];
+  for (const p of info.tracking.providers) {
+    allEvents.push(...p.events);
   }
 
-  if (info.events && info.events.length > 0) {
+  if (allEvents.length > 0) {
     lines.push("");
     lines.push("Tracking History:");
-    for (const ev of info.events) {
-      const loc = ev.location ? ` — ${ev.location}` : "";
-      lines.push(`  [${ev.time_utc}]${loc}`);
+    for (const ev of allEvents) {
+      const time = ev.time_utc ?? ev.time_iso ?? ev.time_raw ?? "—";
+      const loc  = ev.location ? ` — ${ev.location}` : "";
+      lines.push(`  [${time}]${loc}`);
       lines.push(`    ${ev.description}`);
     }
   }
@@ -200,12 +229,16 @@ server.tool(
 
     if (result.data.rejected && result.data.rejected.length > 0) {
       const err = result.data.rejected[0];
+      // -18019909 = registered but no carrier scan yet — not a hard error
+      const noInfoYet = err.error.code === -18019909;
       return {
-        isError: true,
+        isError: !noInfoYet,
         content: [
           {
             type: "text",
-            text: `Failed to retrieve tracking for ${err.number}: ${err.error.message} (code ${err.error.code})`,
+            text: noInfoYet
+              ? `Tracking number ${err.number} is registered but no carrier scans have been recorded yet. Check back later.`
+              : `Failed to retrieve tracking for ${err.number}: ${err.error.message} (code ${err.error.code})`,
           },
         ],
       };
@@ -218,9 +251,8 @@ server.tool(
       };
     }
 
-    const info = result.data.accepted[0].track_info;
     return {
-      content: [{ type: "text", text: formatTrackInfo(info) }],
+      content: [{ type: "text", text: formatTrackInfo(result.data.accepted[0]) }],
     };
   }
 );
@@ -263,7 +295,7 @@ server.tool(
     if (result.data.accepted && result.data.accepted.length > 0) {
       for (const item of result.data.accepted) {
         lines.push("─".repeat(60));
-        lines.push(formatTrackInfo(item.track_info));
+        lines.push(formatTrackInfo(item));
       }
     }
 
@@ -463,13 +495,14 @@ server.tool(
   async () => {
     const result = await apiPost<ApiQuotaResponse>("/getquota", []);
 
-    const { quota, used, remaining } = result.data;
-    const pct = quota > 0 ? ((used / quota) * 100).toFixed(1) : "0.0";
+    const { quota_total, quota_used, quota_remain, today_used } = result.data;
+    const pct = quota_total > 0 ? ((quota_used / quota_total) * 100).toFixed(1) : "0.0";
 
     const text = [
-      `Total quota  : ${quota.toLocaleString()}`,
-      `Used         : ${used.toLocaleString()} (${pct}%)`,
-      `Remaining    : ${remaining.toLocaleString()}`,
+      `Total quota  : ${quota_total.toLocaleString()}`,
+      `Used         : ${quota_used.toLocaleString()} (${pct}%)`,
+      `Remaining    : ${quota_remain.toLocaleString()}`,
+      `Used today   : ${today_used.toLocaleString()}`,
     ].join("\n");
 
     return { content: [{ type: "text", text }] };
