@@ -1,0 +1,41 @@
+{
+  "name": "parcel-tracking-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for parcel tracking via the 17track API",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "parcel-tracking",
+    "17track",
+    "shipping",
+    "package-tracking"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "parcel-tracking-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
