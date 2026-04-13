@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "parcel-tracking": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/index.js"],
+      "env": {
+        "SEVENTEEN_TRACK_API_KEY": "${SEVENTEEN_TRACK_API_KEY}"
+      }
+    }
+  }
+}

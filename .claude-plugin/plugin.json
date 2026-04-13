@@ -1,0 +1,12 @@
+{
+  "name": "parcel-tracking",
+  "version": "0.1.0",
+  "description": "Track parcels worldwide via the 17track API. Supports 2,400+ carriers including FedEx, UPS, DHL, USPS, and more.",
+  "author": {
+    "name": "felipecabargas"
+  },
+  "repository": "https://github.com/felipecabargas/parcel-tracking-mcp",
+  "license": "MIT",
+  "keywords": ["parcel", "tracking", "shipping", "17track", "fedex", "ups", "dhl", "usps"],
+  "mcpServers": "./.mcp.json"
+}
