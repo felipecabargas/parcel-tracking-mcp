@@ -1,6 +1,6 @@
 {
   "name": "parcel-tracking-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "MCP server for parcel tracking via the 17track API",
   "keywords": [
     "mcp",
